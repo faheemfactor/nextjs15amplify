@@ -1,5 +1,10 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+.history
+
+
+
+
 # dependencies
 /node_modules
 /.pnp
@@ -30,6 +35,21 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# aws amplify
+aws-amplify-log/
+amplify/
+amplifyconfig.json
+aws-exports.js
+awsconfiguration.json
+amplify-build-config.json
+amplify-gradle-config.json
+amplifytools.xcconfig
+.secret-*
+amplify/.config/local-*
+amplify/#current-cloud-backend
+amplify/backend/amplify-meta.json
+amplify/backend/.temp
 
 # typescript
 *.tsbuildinfo
