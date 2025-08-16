@@ -3,10 +3,98 @@
 # AWS Amplify Log Downloader Script
 # This script downloads logs for a specific AWS Amplify app and job
 
+/*
+
+# ------------------------------------------------------------
+# sample script for amplify YAML file
+# Environment variables:    ARTIFACT_BUCKET
+# ------------------------------------------------------------
+
+# version: 1
+# applications:
+#   - frontend:
+#       phases:
+#         preBuild:
+#           commands:
+#             - nvm use 20
+#             - corepack enable
+#             - |
+#               if [ -n "$ARTIFACT_BUCKET" ]; then
+#                 echo "Verifying S3 permissions for artifact bucket: $ARTIFACT_BUCKET"
+                
+#                 if aws s3 ls s3://$ARTIFACT_BUCKET > /dev/null 2>&1; then
+#                   echo "✅ SUCCESS: Can access S3 bucket $ARTIFACT_BUCKET"
+                  
+#                   TEST_FILE="test-permission-$(date +%s).txt"
+#                   echo "Testing write permissions..." > /tmp/$TEST_FILE
+                  
+#                   if aws s3 cp /tmp/$TEST_FILE s3://$ARTIFACT_BUCKET/test-permissions/ > /dev/null 2>&1; then
+#                     echo "✅ SUCCESS: Can write to S3 bucket $ARTIFACT_BUCKET"
+#                     aws s3 rm s3://$ARTIFACT_BUCKET/test-permissions/$TEST_FILE > /dev/null 2>&1
+#                   else
+#                     echo "❌ ERROR: Cannot write to S3 bucket $ARTIFACT_BUCKET"
+#                     echo "Please check IAM permissions for the Amplify service role"
+#                     exit 1
+#                   fi
+                  
+#                   rm -f /tmp/$TEST_FILE
+#                 else
+#                   echo "❌ ERROR: Cannot access S3 bucket $ARTIFACT_BUCKET"
+#                   echo "Please check:"
+#                   echo "1. Bucket name is correct"
+#                   echo "2. IAM permissions for the Amplify service role"
+#                   echo "3. Bucket exists and is accessible"
+#                   exit 1
+#                 fi
+#               else
+#                 echo "⚠️  WARNING: ARTIFACT_BUCKET environment variable not set"
+#                 echo "Artifact upload will be skipped. Set ARTIFACT_BUCKET in Amplify environment variables to enable artifact preservation."
+#               fi
+#         build:
+#           commands:
+#             - pnpm --filter @crmk-mm/utils build
+#             - pnpm --filter @crmk-mm/web-consumer build:prod
+#             - |
+#               if [ -d "apps/web-consumer/.next" ]; then
+#                 echo "Uploading .next directory to S3 for artifact preservation..."
+                
+#                 # Get Amplify environment variables
+#                 APP_ID="${AWS_APP_ID:-unknown}"
+#                 BRANCH_NAME="${AWS_BRANCH:-unknown}"
+#                 JOB_ID="${CODEBUILD_BUILD_NUMBER:-unknown}"
+#                 BUILD_ID="${CODEBUILD_BUILD_ID:-unknown}"
+                
+#                 echo "App ID: $APP_ID"
+#                 echo "Branch: $BRANCH_NAME"
+#                 echo "Job ID: $JOB_ID"
+#                 echo "Build ID: $BUILD_ID"
+                
+#                 # Create a more organized S3 path structure
+#                 S3_PATH="artifacts/$APP_ID/$BRANCH_NAME/$JOB_ID"
+                
+#                 aws s3 sync apps/web-consumer/.next s3://$ARTIFACT_BUCKET/$S3_PATH/.next --delete
+#                 echo "Artifact upload completed. Build artifacts preserved in S3 at: s3://$ARTIFACT_BUCKET/$S3_PATH/.next"
+#               else
+#                 echo "Warning: .next directory not found after build"
+#               fi
+#       artifacts:
+#         baseDirectory: apps/web-consumer/.next/standalone/apps/web-consumer
+#         files:
+#           - "**/*"
+#       cache:
+#         paths:
+#           - apps/web-consumer/.next/cache/**/*
+#           - apps/web-consumer/node_modules/**/*
+#           - libs/utils/dist/**/*
+#       buildPath: /
+#     appRoot: apps/web-consumer
+
+# ------------------------------------------------------------
+
 # Default configuration variables
-APP_ID="d3k5nbxvxuz6fb"
-JOB_ID="3"
-BRANCH_NAME="main"
+APP_ID="d1xt9tuzgdhhye"
+JOB_ID="7"
+BRANCH_NAME="develop-stage"
 LOG_DIR="./aws-amplify-log"
 ARTIFACT_BUCKET="public-mm"
 DOWNLOAD_ARTIFACTS=true
@@ -78,8 +166,8 @@ parse_arguments() {
         esac
     done
     
-    # Set the final log directory to include job ID
-    LOG_DIR="${LOG_DIR}/${JOB_ID}"
+    # Set the final log directory to include app ID, branch, and job ID
+    LOG_DIR="${LOG_DIR}/${APP_ID}/${BRANCH_NAME}/${JOB_ID}"
     
     # Validate artifact download requirements
     if [ "$DOWNLOAD_ARTIFACTS" = true ] && [ -z "$ARTIFACT_BUCKET" ]; then
@@ -200,7 +288,7 @@ download_artifacts() {
     print_status "Downloading .next artifacts from S3..."
     
     local artifact_dir="$LOG_DIR/.next"
-    local s3_path="s3://$ARTIFACT_BUCKET/artifacts/$JOB_ID/.next"
+    local s3_path="s3://$ARTIFACT_BUCKET/artifacts/$APP_ID/$BRANCH_NAME/$JOB_ID/.next"
     
     # Check if artifacts exist in S3
     if aws s3 ls "$s3_path" &> /dev/null; then
@@ -263,7 +351,7 @@ EOF
     if [ "$DOWNLOAD_ARTIFACTS" = true ] && [ -d "$LOG_DIR/.next" ]; then
         echo "" >> "$summary_file"
         echo "Downloaded Artifacts:" >> "$summary_file"
-        echo "- .next directory (from S3: $ARTIFACT_BUCKET/artifacts/$JOB_ID/.next)" >> "$summary_file"
+        echo "- .next directory (from S3: $ARTIFACT_BUCKET/artifacts/$APP_ID/$BRANCH_NAME/$JOB_ID/.next)" >> "$summary_file"
         echo "- Total files: $(find "$LOG_DIR/.next" -type f | wc -l)" >> "$summary_file"
     fi
     
