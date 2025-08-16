@@ -1,63 +1,86 @@
 version: 1
-frontend:
-  phases:
-    preBuild:
-      commands:
-        - npm install --no-frozen-lockfile
-        # Verify S3 permissions for artifact upload
-        - |
-          if [ -n "$ARTIFACT_BUCKET" ]; then
-            echo "Verifying S3 permissions for artifact bucket: $ARTIFACT_BUCKET"
-            
-            # Test if we can list the bucket
-            if aws s3 ls s3://$ARTIFACT_BUCKET > /dev/null 2>&1; then
-              echo "✅ SUCCESS: Can access S3 bucket $ARTIFACT_BUCKET"
-              
-              # Test if we can write to the bucket by creating a test file
-              TEST_FILE="test-permission-$(date +%s).txt"
-              echo "Testing write permissions..." > /tmp/$TEST_FILE
-              
-              if aws s3 cp /tmp/$TEST_FILE s3://$ARTIFACT_BUCKET/test-permissions/ > /dev/null 2>&1; then
-                echo "✅ SUCCESS: Can write to S3 bucket $ARTIFACT_BUCKET"
-                # Clean up test file
-                aws s3 rm s3://$ARTIFACT_BUCKET/test-permissions/$TEST_FILE > /dev/null 2>&1
+applications:
+  - frontend:
+      phases:
+        preBuild:
+          commands:
+            - nvm use 20
+            #- corepack enable
+            - |
+              if [ -n "$ARTIFACT_BUCKET" ]; then
+                echo "Verifying S3 permissions for artifact bucket: $ARTIFACT_BUCKET"
+                
+                if aws s3 ls s3://$ARTIFACT_BUCKET > /dev/null 2>&1; then
+                  echo "✅ SUCCESS: Can access S3 bucket $ARTIFACT_BUCKET"
+                  
+                  TEST_FILE="test-permission-$(date +%s).txt"
+                  echo "Testing write permissions..." > /tmp/$TEST_FILE
+                  
+                  if aws s3 cp /tmp/$TEST_FILE s3://$ARTIFACT_BUCKET/test-permissions/ > /dev/null 2>&1; then
+                    echo "✅ SUCCESS: Can write to S3 bucket $ARTIFACT_BUCKET"
+                    aws s3 rm s3://$ARTIFACT_BUCKET/test-permissions/$TEST_FILE > /dev/null 2>&1
+                  else
+                    echo "❌ ERROR: Cannot write to S3 bucket $ARTIFACT_BUCKET"
+                    echo "Please check IAM permissions for the Amplify service role"
+                    exit 1
+                  fi
+                  
+                  rm -f /tmp/$TEST_FILE
+                else
+                  echo "❌ ERROR: Cannot access S3 bucket $ARTIFACT_BUCKET"
+                  echo "Please check:"
+                  echo "1. Bucket name is correct"
+                  echo "2. IAM permissions for the Amplify service role"
+                  echo "3. Bucket exists and is accessible"
+                  exit 1
+                fi
               else
-                echo "❌ ERROR: Cannot write to S3 bucket $ARTIFACT_BUCKET"
-                echo "Please check IAM permissions for the Amplify service role"
-                exit 1
+                echo "⚠️  WARNING: ARTIFACT_BUCKET environment variable not set"
+                echo "Artifact upload will be skipped. Set ARTIFACT_BUCKET in Amplify environment variables to enable artifact preservation."
               fi
-              
-              rm -f /tmp/$TEST_FILE
-            else
-              echo "❌ ERROR: Cannot access S3 bucket $ARTIFACT_BUCKET"
-              echo "Please check:"
-              echo "1. Bucket name is correct"
-              echo "2. IAM permissions for the Amplify service role"
-              echo "3. Bucket exists and is accessible"
-              exit 1
-            fi
-          else
-            echo "⚠️  WARNING: ARTIFACT_BUCKET environment variable not set"
-            echo "Artifact upload will be skipped. Set ARTIFACT_BUCKET in Amplify environment variables to enable artifact preservation."
-          fi
-    build:
-      commands:
-        - npm run build
-        - find . -type f -not -path "./node_modules/*" -not -path "*/node_modules/*"
-        # Upload .next directory to S3 for artifact preservation
-        - |
-          if [ -d ".next" ]; then
-            echo "Uploading .next directory to S3 for artifact preservation..."
-            aws s3 sync .next s3://$ARTIFACT_BUCKET/artifacts/$CODEBUILD_BUILD_NUMBER/.next --delete
-            echo "Artifact upload completed. Build artifacts preserved in S3."
-          else
-            echo "Warning: .next directory not found after build"
-          fi
-  artifacts:
-    baseDirectory: .next
-    files:
-      - '**/*'
-  cache:
-    paths:
-      - .next/cache/**/*
-      - .npm/**/*
+            - npm install -g pnpm@10.14.0
+            #- pnpm install --no-frozen-lockfile
+            - export STAGE=prod
+            - export NODE_ENV=production
+            - echo "Building utils package"
+            - pnpm --filter @crmk-mm/utils install --no-frozen-lockfile
+            - pnpm --filter @crmk-mm/utils build
+            - pnpm --filter @crmk-mm/web-consumer install --no-frozen-lockfile
+        build:
+          commands:
+            - pnpm --filter @crmk-mm/utils build
+            - pnpm --filter @crmk-mm/web-consumer build:prod
+            - |
+              if [ -d "apps/web-consumer/.next" ]; then
+                 echo "Uploading .next directory to S3 for artifact preservation..."
+                
+                # Get Amplify environment variables
+                APP_ID="${AWS_APP_ID:-unknown}"
+                BRANCH_NAME="${AWS_BRANCH:-unknown}"
+                JOB_ID="${CODEBUILD_BUILD_NUMBER:-unknown}"
+                BUILD_ID="${CODEBUILD_BUILD_ID:-unknown}"
+                
+                echo "App ID: $APP_ID"
+                echo "Branch: $BRANCH_NAME"
+                echo "Job ID: $JOB_ID"
+                echo "Build ID: $BUILD_ID"
+                
+                # Create a more organized S3 path structure
+                S3_PATH="artifacts/$APP_ID/$BRANCH_NAME/$JOB_ID"
+                
+                aws s3 sync apps/web-consumer/.next s3://$ARTIFACT_BUCKET/$S3_PATH/.next --delete
+                echo "Artifact upload completed. Build artifacts preserved in S3 at: s3://$ARTIFACT_BUCKET/$S3_PATH/.next"
+              else
+                echo "Warning: .next directory not found after build"
+              fi
+      artifacts:
+        baseDirectory: apps/web-consumer/.next/standalone/apps/web-consumer
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - apps/web-consumer/.next/cache/**/*
+          - apps/web-consumer/node_modules/**/*
+          - libs/utils/dist/**/*
+      buildPath: /
+    appRoot: apps/web-consumer
